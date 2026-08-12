@@ -3,6 +3,12 @@
 import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
 import React, { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlayback } from '@/context/PlaybackContext';
+// Side-effect import: configures the local Monaco instance before the editor mounts.
+import {
+  initializeMonaco,
+  subscribeWorkerStatus,
+  type WorkerSetupStatus,
+} from '@/lib/monacoWorkerSetup';
 import { formatExecutionOutput } from '@/lib/formatExecutionOutput';
 
 const executionApiUrl = process.env.NEXT_PUBLIC_EXECUTE_API_URL ?? 'http://localhost:4000/api/execute';
@@ -234,6 +240,9 @@ export default function CodeEditor() {
   const [isSashDragging, setIsSashDragging] = useState(false);
   const [dockPosition, setDockPosition] = useState<DockPosition>('bottom');
   const [isEditorReady, setIsEditorReady] = useState(false);
+  // Worker status: 'workers' = offloaded to Worker threads, 'fallback' = main-thread mode
+  const [workerStatus, setWorkerStatus] = useState<WorkerSetupStatus>('workers');
+  const [workerBannerDismissed, setWorkerBannerDismissed] = useState(false);
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -255,6 +264,14 @@ export default function CodeEditor() {
       attributeFilter: ['data-theme'],
     });
     return () => observer.disconnect();
+  }, []);
+
+  // Keep the warning reactive to both synchronous construction failures and
+  // asynchronous worker loading errors.
+  useEffect(() => {
+    const unsubscribe = subscribeWorkerStatus(setWorkerStatus);
+    void initializeMonaco().catch(() => undefined);
+    return unsubscribe;
   }, []);
   const selectedSnapshot = selectedSnapshotIndex === null ? null : snapshots[selectedSnapshotIndex] ?? null;
   const selectedVariables = selectedSnapshot ? Object.entries(selectedSnapshot.variables) : [];
@@ -467,6 +484,7 @@ export default function CodeEditor() {
     resetPanel();
   };
 
+feat/time-travel-debug-49
   const closeShareModal = () => {
     if (shareAbortControllerRef.current) {
       shareAbortControllerRef.current.abort();
@@ -623,6 +641,50 @@ export default function CodeEditor() {
       </div>
     );
   };
+  /** Dismissible banner shown when Monaco workers failed to load. */
+  const workerFallbackBanner = workerStatus === 'fallback' && !workerBannerDismissed ? (
+    <div
+      role="alert"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '6px 12px',
+        fontSize: '12px',
+        background: 'rgba(234, 179, 8, 0.12)',
+        borderBottom: '1px solid rgba(234, 179, 8, 0.35)',
+        color: 'var(--text-secondary, #94a3b8)',
+        gap: '8px',
+        flexShrink: 0,
+      }}
+    >
+      <span>
+        ⚠️ <strong>Editor running in compatibility mode.</strong>{' '}
+        Language services (IntelliSense, diagnostics) are unavailable because web
+        workers could not be loaded — possibly due to a Content Security Policy or
+        network restriction. Editing and execution remain fully functional.
+      </span>
+      <button
+        type="button"
+        aria-label="Dismiss worker warning"
+        onClick={() => setWorkerBannerDismissed(true)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: 'inherit',
+          fontSize: '14px',
+          flexShrink: 0,
+          padding: '0 4px',
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  ) : null;
+
+main
   // ✅ Shared button style using CSS variables
   const quickBtnStyle: React.CSSProperties = {
     background: 'transparent',
@@ -657,12 +719,34 @@ export default function CodeEditor() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span>Playback Engine</span>
           {output ? (
-            <span style={{ opacity: 0.7, fontSize: '0.78rem' }}>
-              {snapshots.length} snapshots · {output.instrumentation?.hookCount ?? 0} hooks · {output.durationMs}ms
-            </span>
-          ) : (
-            <span style={{ opacity: 0.7, fontSize: '0.78rem' }}>Idle</span>
-          )}
+  <>
+    <span style={{ opacity: 0.7, fontSize: "0.78rem" }}>
+      {snapshots.length} snapshots ·
+      {output.instrumentation?.hookCount ?? 0} hooks ·
+      {output.durationMs}ms
+    </span>
+
+    {output.complexity && (
+      <div style={{ marginTop: "8px" }}>
+        <strong>Complexity</strong>
+
+        {output.complexity.available ? (
+          <>
+            <div>Big-O: {output.complexity.bigO}</div>
+
+            {output.complexity.explanation && (
+              <div>{output.complexity.explanation}</div>
+            )}
+          </>
+        ) : (
+          <div>{output.complexity.explanation}</div>
+        )}
+      </div>
+    )}
+  </>
+) : (
+  <span style={{ opacity: 0.7, fontSize: "0.78rem" }}>Idle</span>
+)}
         </div>
         <div role="status" aria-live="polite">
           {copyStatus}
@@ -898,9 +982,14 @@ export default function CodeEditor() {
           height: '100%',
           maxHeight: 'calc(100vh - 120px)',
           minHeight: 0,
+feat/time-travel-debug-49
             feat/time-travel-debug-49
           gridTemplateRows: `auto auto 1fr 6px ${bottomHeight}px`,
             main
+          gridTemplateRows: workerFallbackBanner
+            ? `auto auto auto 1fr 6px ${bottomHeight}px`
+            : `auto auto 1fr 6px ${bottomHeight}px`,
+main
           position: 'relative',
           overflow: 'hidden',
         }}
@@ -909,6 +998,7 @@ export default function CodeEditor() {
           <div style={{ position: 'fixed', inset: 0, zIndex: 99999, cursor: 'ew-resize', backgroundColor: 'transparent', userSelect: 'none' }} />
         )}
 
+feat/time-travel-debug-49
         feat/time-travel-debug-49
         {/* Left — editor */}
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -936,6 +1026,8 @@ export default function CodeEditor() {
               options={options}
             />
           </div>
+        {workerFallbackBanner}
+main
         <div className="runnerToolbar">
           <button className="primaryAction" type="button" onClick={runCode} disabled={isRunning}>
             {isRunning ? 'Tracing…' : 'Trace Execution'}
@@ -1016,6 +1108,8 @@ export default function CodeEditor() {
 
       {/* Left — editor */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+        {workerFallbackBanner}
+
         <div className="runnerToolbar">
           <button className="primaryAction" type="button" onClick={runCode} disabled={isRunning}>
             {isRunning ? 'Tracing…' : 'Trace Execution'}

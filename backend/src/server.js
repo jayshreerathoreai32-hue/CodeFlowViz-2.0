@@ -1,9 +1,15 @@
 import { estimateComplexity } from './tracing/complexityAnalyzer.mjs';
 import express from 'express';
-import { runInSandbox } from './sandbox/runner.mjs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runInSandbox, cleanupWorkerResources, workerResources } from './sandbox/runner.mjs';
 import rateLimit from 'express-rate-limit';
+feat/time-travel-debug-49
 import { SessionStore } from './services/sessionStore.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
+import { treeKill } from './sandbox/processTreeKill.mjs';
+export { runInSandbox, cleanupWorkerResources, workerResources, treeKill };
+main
 
 const DEFAULT_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 5_000;
@@ -14,21 +20,60 @@ const DEFAULT_PORT = 4000;
 
 const app = express();
 const port = Number.parseInt(process.env.PORT ?? `${DEFAULT_PORT}`, 10);
-const allowedOrigin = process.env.CORS_ORIGIN ?? '*';
 
-app.use((request, response, next) => {
-  response.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  response.setHeader('Vary', 'Origin');
-  response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (request.method === 'OPTIONS') {
-    response.sendStatus(204);
-    return;
+export function parseAllowedOrigins(corsOriginEnv = process.env.CORS_ORIGIN) {
+  if (!corsOriginEnv) {
+    console.warn('CORS_ORIGIN not set: cross-origin requests will be rejected. For local development, set CORS_ORIGIN=http://localhost:3000');
+    return [];
   }
 
-  next();
-});
+  const origins = corsOriginEnv
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (origins.includes('*')) {
+    console.error('Security: CORS_ORIGIN contains wildcard "*" which is not allowed in this configuration');
+    return [];
+  }
+
+  return [...new Set(origins)];
+}
+
+export function isCorsAllowed(origin, allowedOrigins) {
+  return allowedOrigins.includes(origin);
+}
+
+export function createCorsMiddleware(allowedOrigins = parseAllowedOrigins()) {
+  return (request, response, next) => {
+    const origin = request.get('Origin');
+
+    response.vary('Origin');
+
+    if (origin && !isCorsAllowed(origin, allowedOrigins)) {
+      response.status(403).json({
+        ok: false,
+        error: 'Origin is not allowed by the server CORS policy.',
+      });
+      return;
+    }
+
+    if (origin) {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+
+    if (request.method === 'OPTIONS') {
+      response.sendStatus(204);
+      return;
+    }
+
+    next();
+  };
+}
+
+app.use(createCorsMiddleware());
 
 app.use(express.json({ limit: '64kb' }));
 
@@ -71,7 +116,13 @@ app.post('/api/execute', executeLimiter, async (request, response) => {
 
   // 1. Generate the Big-O Estimate from the AST (skip for non-JavaScript languages)
   const isJavaScript = language === 'javascript' || language === 'js';
-  const complexityEstimate = isJavaScript ? estimateComplexity(code) : { bigO: 'Unknown', explanation: 'Complexity analysis only available for JavaScript' };
+  const complexityEstimate = isJavaScript
+    ? estimateComplexity(code)
+    : {
+        available: false,
+        bigO: null,
+        explanation: 'Complexity analysis only available for JavaScript.',
+      };
   const normalizedTimeoutMs = normalizeTimeout(timeoutMs);
 
   let result;
@@ -165,6 +216,9 @@ app.use((error, _request, response, _next) => {
   response.status(500).json({ ok: false, error: 'Unexpected backend error.' });
 });
 
-app.listen(port, () => {
-  console.log(`CodeFlowViz backend listening on http://localhost:${port}`);
-});
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === fileURLToPath(pathToFileURL(path.resolve(process.argv[1])));
+if (isMainModule) {
+  app.listen(port, () => {
+    console.log(`CodeFlowViz backend listening on http://localhost:${port}`);
+  });
+}

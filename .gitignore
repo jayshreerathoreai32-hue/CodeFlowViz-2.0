@@ -6,3 +6,5 @@ npm-debug.log*
 backend/data/
 feat/time-travel-debug-49
 main
+frontend/public/monaco/
+main
