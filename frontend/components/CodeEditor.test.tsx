@@ -246,5 +246,65 @@ describe('CodeEditor timeout selector', () => {
     expect(screen.queryByRole('heading', { name: /Execution Timed Out/i })).not.toBeInTheDocument();
     expect(screen.getByText('ReferenceError: x is not defined')).toBeInTheDocument();
   });
-});
 
+  it('regression: banner shows submitted timeout even when selector is changed after run', async () => {
+    // Start with no output, simulate a 3s run that timed out
+    const runCodeMock = vi.fn().mockResolvedValue(undefined);
+    usePlaybackMock.mockReturnValue({
+      code: 'while(true){}',
+      setCode: vi.fn(),
+      output: null,
+      isRunning: false,
+      runCode: runCodeMock,
+      snapshots: [],
+      playback: {
+        selectedSnapshotIndex: null,
+        setSelectedSnapshotIndex: vi.fn(),
+      },
+    });
+
+    const { rerender } = render(<CodeEditor />);
+
+    // Change timeout selector to 3s and click Trace
+    const selector = screen.getAllByLabelText('Execution timeout')[0] as HTMLSelectElement;
+    fireEvent.change(selector, { target: { value: '3000' } });
+
+    const traceBtn = screen.getAllByRole('button', { name: /Trace Execution/i })[0];
+    await act(async () => {
+      fireEvent.click(traceBtn);
+    });
+
+    // Now simulate a timed-out response arriving
+    const timedOutOutput: ExecutionResponse = {
+      ok: false,
+      error: 'Execution timed out after 3000ms.',
+      logs: [],
+      timeline: [],
+      durationMs: 3001,
+      timedOut: true,
+    };
+    usePlaybackMock.mockReturnValue({
+      code: 'while(true){}',
+      setCode: vi.fn(),
+      output: timedOutOutput,
+      isRunning: false,
+      runCode: runCodeMock,
+      snapshots: [],
+      playback: {
+        selectedSnapshotIndex: null,
+        setSelectedSnapshotIndex: vi.fn(),
+      },
+    });
+    rerender(<CodeEditor />);
+
+    // User changes selector to 5s AFTER the run completed
+    const selectorAfter = screen.getAllByLabelText('Execution timeout')[0] as HTMLSelectElement;
+    fireEvent.change(selectorAfter, { target: { value: '5000' } });
+
+    // Banner must still report 3s (the value used for the execution), not 5s
+    const banner = screen.getByRole('heading', { name: /Execution Timed Out/i });
+    expect(banner).toBeInTheDocument();
+    expect(screen.getByText(/3 seconds/i)).toBeInTheDocument();
+    expect(screen.queryByText(/5 seconds/i)).not.toBeInTheDocument();
+  });
+});

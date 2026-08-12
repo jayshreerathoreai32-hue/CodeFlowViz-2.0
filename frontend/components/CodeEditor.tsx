@@ -198,6 +198,7 @@ export default function CodeEditor() {
   const clearStatusTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const [timeoutMs, setTimeoutMs] = useState(1000);
+  const [lastUsedTimeoutMs, setLastUsedTimeoutMs] = useState(1000);
   const [elapsedTimeMs, setElapsedTimeMs] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -681,7 +682,7 @@ export default function CodeEditor() {
                       <span aria-hidden="true">⏱️</span> Execution Timed Out
                     </h3>
                     <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.4' }}>
-                      The code exceeded the maximum allowed execution time of <strong>{timeoutMs / 1000} seconds</strong>.
+                      The code exceeded the maximum allowed execution time of <strong>{lastUsedTimeoutMs / 1000} seconds</strong>.
                       This usually indicates an infinite loop or highly inefficient logic.
                     </p>
                     <pre className="errorText" style={{ marginTop: '8px', marginBottom: 0 }}>{output.error}</pre>
@@ -804,7 +805,7 @@ export default function CodeEditor() {
 
         <div className="runnerToolbar">
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button className="primaryAction" type="button" onClick={() => runCode(timeoutMs)} disabled={isRunning}>
+            <button className="primaryAction" type="button" onClick={() => { setLastUsedTimeoutMs(timeoutMs); runCode(timeoutMs); }} disabled={isRunning}>
               {isRunning ? `Tracing (${(elapsedTimeMs / 1000).toFixed(1)}s / ${timeoutMs / 1000}s)…` : 'Trace Execution'}
             </button>
             <select
@@ -891,7 +892,7 @@ export default function CodeEditor() {
 
         <div className="runnerToolbar">
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button className="primaryAction" type="button" onClick={() => runCode(timeoutMs)} disabled={isRunning}>
+            <button className="primaryAction" type="button" onClick={() => { setLastUsedTimeoutMs(timeoutMs); runCode(timeoutMs); }} disabled={isRunning}>
               {isRunning ? `Tracing (${(elapsedTimeMs / 1000).toFixed(1)}s / ${timeoutMs / 1000}s)…` : 'Trace Execution'}
             </button>
             <select
