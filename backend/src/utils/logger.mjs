@@ -23,11 +23,19 @@ class Logger {
     }
 
     if (error) {
-      logEntry.error = {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      };
+      if (error instanceof Error) {
+        logEntry.error = {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        };
+      } else {
+        const message = typeof error === 'string' ? error : JSON.stringify(error) || String(error);
+        logEntry.error = {
+          name: 'UnknownError',
+          message,
+        };
+      }
     }
 
     if (process.env.NODE_ENV === 'development') {
@@ -39,7 +47,10 @@ class Logger {
         out += `\n  Context: ${JSON.stringify(logEntry.context)}`;
       }
       if (logEntry.error) {
-        out += `\n  Error: ${logEntry.error.message}\n${logEntry.error.stack}`;
+        out += `\n  Error: ${logEntry.error.message}`;
+        if (logEntry.error.stack) {
+          out += `\n${logEntry.error.stack}`;
+        }
       }
       return out;
     }

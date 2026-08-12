@@ -59,7 +59,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
+  const headerId = request.headers.get('x-request-id');
+  const requestId = (headerId && headerId.trim() !== '') ? headerId.trim() : crypto.randomUUID();
 
   try {
     const upstreamResponse = await fetch(executionApiUrl, {
